@@ -1,0 +1,46 @@
+data:
+  f0_extractor: 'parselmouth' # 'parselmouth' (singing) or 'dio' (speech) or 'harvest' (speech)
+  f0_min: 65 # about C2
+  f0_max: 800 # about G5
+  sampling_rate: 44100
+  n_fft: 2048
+  win_size: 2048
+  hop_size: 512 # Equal to hop_length
+  n_mels: 128
+  mel_fmin: 40 
+  mel_fmax: 16000 # <= sampling_rate / 2 
+  max_nhar: 128
+  relative_winsize: 4
+  duration: 2 # Audio duration during training, must be less than the duration of the shortest audio clip
+  train_path: data/train # Create a folder named "audio" under this path and put the audio clip in it
+  valid_path: data/val # Create a folder named "audio" under this path and put the audio clip in it
+  # directories: ['audio', 'haudio', 'mel', 'f0', 'uv', 'ampl', 'phase']
+  mel_clamp: 0.000001 # clamp the output of the model to avoid numerical instability
+model:
+  type: 'SinStack'
+  win_length: 2048 
+  pre_phase: true
+  n_sin_hars: 128
+  n_noise_bin: 64
+loss:
+  fft_min: 256
+  fft_max: 2048
+  n_scale: 4 # rss kernel numbers
+  lambda_uv: 0.0 # uv regularization
+  lambda_ampl: 1.0 # amplitude regularization
+  lambda_phase: 0.0 # phase regularization
+  uv_tolerance: 0.05 # set it to a large value or try other f0 extractors if val_loss_uv is much higher than train_loss_uv
+  detach_uv_step: 200
+device: cuda
+env:
+  expdir: exp/second3
+  gpu_id: 0
+train:
+  num_workers: 2 # if your cpu and gpu are both very strong, set to 0 may be faster!
+  batch_size: 5
+  cache_all_data: true # Save Internal-Memory if it is false, but may be slow
+  epochs: 100000
+  interval_log: 10
+  interval_val: 500
+  lr: 0.0005
+  weight_decay: 0
