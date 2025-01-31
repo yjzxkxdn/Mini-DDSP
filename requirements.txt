@@ -1,0 +1,9 @@
+gin
+gin_config
+librosa
+numpy
+praat-parselmouth
+pyworld
+PyYAML
+SoundFile
+tqdm
