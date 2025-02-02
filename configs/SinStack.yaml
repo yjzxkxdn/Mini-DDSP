@@ -9,7 +9,7 @@ data:
   n_mels: 128
   mel_fmin: 40 
   mel_fmax: 16000 # <= sampling_rate / 2 
-  max_nhar: 64 # must be equal to model.n_sin_hars
+  max_nhar: 128 # must be equal to model.n_sin_hars
   relative_winsize: 4
   duration: 2 # Audio duration during training, must be less than the duration of the shortest audio clip
   train_path: data/train # Create a folder named "audio" under this path and put the audio clip in it
@@ -19,7 +19,7 @@ data:
 model:
   type: 'SinStack'
   win_length: 2048 
-  n_sin_hars: 64
+  n_sin_hars: 128
   n_noise_bin: 64
 
   triangle_ReLU : true # use triangle ReLU instead of ReLU
@@ -32,20 +32,20 @@ loss:
   fft_max: 2048
   n_scale: 4 # rss kernel numbers
   lambda_uv: 0.0 # uv regularization
-  lambda_ampl: 0.0 # amplitude regularization
+  lambda_ampl: 0.3 # amplitude regularization
   lambda_phase: 0.0 # phase regularization
   uv_tolerance: 0.05 # set it to a large value or try other f0 extractors if val_loss_uv is much higher than train_loss_uv
   detach_uv_step: 200
 device: cuda
 env:
-  expdir: exp/qixuan8
+  expdir: exp/test
   gpu_id: 0
 train:
   num_workers: 2 # if your cpu and gpu are both very strong, set to 0 may be faster!
-  batch_size: 16
+  batch_size: 10
   cache_all_data: true # Save Internal-Memory if it is false, but may be slow
   epochs: 100000
-  interval_log: 50
+  interval_log: 10
   interval_val: 1000
   lr: 0.0005
   weight_decay: 0
