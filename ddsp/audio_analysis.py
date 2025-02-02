@@ -35,7 +35,9 @@ def czt(
         通常情况下 A_0 = 1 W_0 = 1 θ = 2π(f0/fs) ϕ = 2π(f0/fs)
     """
     n = x.shape[0]
-    l = int(2 ** np.ceil(np.log2(n + m - 1)))
+    #l = int(2 ** np.ceil(np.log2(n + m - 1)))
+    #使用torch计算
+    l = int(2 ** torch.ceil(torch.log2(torch.tensor(n + m - 1, dtype=torch.double))))
     
     w = W ** (torch.arange(max(m, n), dtype=torch.double, device=x.device)**2 / 2)
 
@@ -52,6 +54,7 @@ def czt(
 
     return yn
 
+@torch.jit.script
 def sinusoidal_analysis_czt_for(
         audio   : torch.Tensor, 
         f0      : torch.Tensor,
@@ -100,8 +103,8 @@ def sinusoidal_analysis_czt_for(
         audio_frame = audio_pad[start_i-winsize_i//2 : start_i+winsize_i//2]
         audio_frame = audio_frame * window
 
-        A = torch.exp(torch.complex(torch.tensor(0.,dtype=torch.double,device=audio.device), 2 * np.pi * f0_i/sr))
-        W = torch.exp(torch.complex(torch.tensor(0.,dtype=torch.double,device=audio.device), -2 * np.pi * f0_i/sr))
+        A = torch.exp(torch.complex(torch.tensor(0.,dtype=torch.double,device=audio.device), 2 * torch.pi * f0_i/sr))
+        W = torch.exp(torch.complex(torch.tensor(0.,dtype=torch.double,device=audio.device), -2 * torch.pi * f0_i/sr))
 
         yn = czt(audio_frame, nhar_i, A, W)
         yn = 2.381 * (yn / (len(audio_frame)//2+1))

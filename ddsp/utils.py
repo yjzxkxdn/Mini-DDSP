@@ -120,7 +120,7 @@ def interp_f0(f0: np.ndarray, uv=None):
     return denorm_f0(f0, uv=None), uv
     
 
-def get_n_fft(f0: torch.Tensor, sr: float, relative_winsize: int):
+def get_n_fft(f0: torch.Tensor, sr: int, relative_winsize: int):
     '''
     Args:
         f0: Tensor [shape = (n_frames)]
