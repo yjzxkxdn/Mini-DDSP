@@ -7,3 +7,4 @@ pyworld
 PyYAML
 SoundFile
 tqdm
+tensorboard
