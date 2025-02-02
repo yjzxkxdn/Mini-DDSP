@@ -1,9 +1,9 @@
 import numpy as np
-
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchaudio
-from torch.nn import functional as F
+
 from .utils import upsample
 
 class HybridLoss(nn.Module):
@@ -45,7 +45,8 @@ class HybridLoss(nn.Module):
         if detach_uv or loss_uv < uv_tolerance:
             loss_uv = loss_uv.detach()
         loss_ampl = self.loss_ampl_func(ampl, ampl_true)
-        loss_phase = self.loss_phase_func(phase, phase_true)
+        # loss_phase = self.loss_phase_func(phase, phase_true)
+        loss_phase = torch.tensor(0.,device="cuda")
         loss = loss_rss + self.lambda_uv * loss_uv + self.lambda_ampl * loss_ampl + self.lambda_phase * loss_phase
         return loss, (loss_rss, loss_uv, loss_ampl, loss_phase)
 

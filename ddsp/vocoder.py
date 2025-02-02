@@ -1,8 +1,11 @@
 import os
+from pathlib import Path
+
 import numpy as np
-import yaml
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
+import yaml
+
 from ddsp.mel2control import Mel2Control
 from .utils import upsample
 
@@ -76,6 +79,7 @@ def load_model(model_path, device='cpu'):
         args = yaml.unsafe_load(config)
     args = DotDict(args)
     
+    model_path = Path(model_path)  
     # load model
     print(' [Loading] ' + str(model_path))
     if model_path.suffix == '.jit':
@@ -107,6 +111,7 @@ class SinStack(torch.nn.Module):
         self.register_buffer("window", torch.hann_window(2*args.data.hop_size))
         self.register_buffer("sin_mag", torch.tensor(args.model.n_sin_hars))
         self.register_buffer("noise_mag", torch.tensor(args.model.n_noise_bin))
+        self.register_buffer("uv_noise_k", torch.tensor(args.model.uv_noise_k))
 
         # Mel2Control
         split_map = {            
@@ -139,7 +144,9 @@ class SinStack(torch.nn.Module):
             self.v_noise,
             self.u_noise,
             device=device,
-            triangle_ReLU = True
+            triangle_ReLU = args.model.triangle_ReLU,
+            triangle_ReLU_up = args.model.triangle_ReLU_up,
+            triangle_ReLU_down = args.model.triangle_ReLU_down,
         )
 
         self.device = device
@@ -209,8 +216,11 @@ class SinStack(torch.nn.Module):
         nhar_range = torch.arange(
             start = 1, end = self.sin_mag + 1, device=self.device
         ).unsqueeze(0).unsqueeze(-1)                              # [max_nhar] -> [1, max_nhar, 1]
+
         f0_list = f0_frames.unsqueeze(1).squeeze(3) * nhar_range  # [batch, 1, T] * [1, max_nhar, 1] -> [batch, max_nhar, T]
         inp = self.phase_prediction(phase_pre_model, torch.tensor(0.0), f0_list, inference)
+
+        inp = inp.to(torch.float32)
 
         # parameter prediction
         ctrls = self.mel2ctrl(mel_frames.transpose(1, 2), inp.transpose(1, 2))
@@ -235,13 +245,12 @@ class SinStack(torch.nn.Module):
         sin_phase = sin_phase + inp # 当使用offset时，不需要算两遍初始相位。使用其它模式时需要注释掉这行使用上面那一行
         sin_mag, sin_phase = rm_mask * sin_mag, rm_mask * sin_phase
 
-
         harmonic = self.sine_generator(sin_mag, sin_phase, f0_list)
 
         # get uv mask
         noise_mag_total = noise_mag.sum(dim=1) # b x T
         harmonic_mag_first = sin_mag[:, 0, :] # b x T
-        uv_mask = 1024*harmonic_mag_first / (1024*harmonic_mag_first + noise_mag_total + 1e-7) # b x T
+        uv_mask = self.uv_noise_k *harmonic_mag_first / (self.uv_noise_k*harmonic_mag_first + noise_mag_total + 1e-7) # b x T
 
         # noise generation
         noise = self.noise_generator(noise_mag, uv_mask, f0_frames.permute(0, 2, 1))
@@ -271,22 +280,18 @@ class Sine_Generator(torch.nn.Module):
         x_list = torch.arange(-self.hop_size, self.hop_size).to(self.device)
         x_list = x_list.unsqueeze(0).unsqueeze(0).unsqueeze(0) # 1 x 1 x 1 x win_size
 
-        #print("dv",f0_list.dtype,x_list.dtype,phase.dtype,ampl.dtype)
-        #print("dv",f0_list.shape,x_list.shape,phase.shape,ampl.shape)
-
         freq_list = (2 * np.pi * f0_list / self.sampling_rate).unsqueeze(-1) * x_list + phase.unsqueeze(-1)  # [batch, max_nhar, T, win_size]
 
         y_tmp = torch.cos(freq_list) * ampl.unsqueeze(-1)  # [batch, max_nhar, T, win_size]
         y_tmp = y_tmp.sum(dim=1)  # [batch, T, win_size]
 
         hann_window = self.window.unsqueeze(0).unsqueeze(0)  # [1, 1, win_size]
-
         y_tmp_weighted = y_tmp * hann_window  # [batch, T, win_size]
 
-        # 将 y_tmp_weighted 转换为适合 fold 的形状
+        '''# 将 y_tmp_weighted 转换为适合 fold 的形状
         y_tmp_weighted_reshaped = y_tmp_weighted.permute(0, 2, 1).contiguous()
         y_tmp_weighted_reshaped = y_tmp_weighted_reshaped.view(B * self.win_size, T) 
-
+        y_tmp_weighted = y_tmp * hann_window  # [batch, T, win_size]
         # 使用 fold 函数来实现滑动窗口效果
         output = torch.nn.functional.fold(
             y_tmp_weighted_reshaped.unsqueeze(0), 
@@ -296,9 +301,25 @@ class Sine_Generator(torch.nn.Module):
         )
         output = output[:, :, self.hop_size:]
 
-        y_return = output.squeeze(0).view(B, T * self.hop_size)
+        y_return = output.squeeze(0).view(B, T * self.hop_size)'''
 
-        return y_return # [batch, T*hop_size]、
+        y_tmp_padded = F.pad(y_tmp_weighted , (0, 0, 0,T % 2), "constant", 0)
+        new_T = y_tmp_padded.shape[1]
+
+        y_tmp_reshaped = y_tmp_padded.view(B, new_T//2, 2, self.win_size)
+        tensor_even = y_tmp_reshaped[:, :, 0, :]  # 偶数时间步
+        tensor_odd = y_tmp_reshaped[:, :, 1, :]   # 奇数时间步
+
+        tensor_even = tensor_even.reshape(B, (new_T//2)*self.win_size)
+        tensor_odd = tensor_odd.reshape(B, (new_T//2)*self.win_size)
+
+        tensor_even = F.pad(tensor_even, (0, self.hop_size), "constant", 0)
+        tensor_odd = F.pad(tensor_odd, (self.hop_size, 0), "constant", 0)
+        cat_tensor = torch.cat((tensor_even.unsqueeze(-1), tensor_odd.unsqueeze(-1)), dim=2)
+        sum_tensor = torch.sum(cat_tensor, dim=2)
+        y_return = sum_tensor[:, self.hop_size:T*self.hop_size + self.hop_size]
+
+        return y_return # [batch, T*hop_size]
     
 class Sine_Generator_Fast(torch.nn.Module):
     def __init__(self, hop_size, sampling_rate, device='cpu'):
@@ -316,6 +337,7 @@ class Sine_Generator_Fast(torch.nn.Module):
             f0_list: B x max_nhar x T
         ''' 
         B, max_nhar, T = ampl.shape
+        
         k = 16 
         winsize = self.win_size
         x_start_list = torch.arange(-winsize/2, winsize/2, winsize/k, device=self.device)
@@ -331,8 +353,6 @@ class Sine_Generator_Fast(torch.nn.Module):
         
         c = 2 * torch.cos(omega) # [batch, max_nhar, T, 1]
         y_tmp = torch.zeros(B, max_nhar, T, winsize, device=self.device)
-        print("shape",y_tmp.shape,x_start_list.shape,omega.shape,ampl.shape,phase.shape)
-        print("shape",torch.cos(omega * x_start_list_c + phase).shape)
         y_tmp[:,:,:,x_start_list] = ampl * torch.cos(omega * x_start_list_c + phase)  # [batch, max_nhar, T, k]
         y_tmp[:,:,:,x_start_list+1] = ampl * torch.cos(omega * (x_start_list_c + 1) + phase)  # [batch, max_nhar, T, k]
         
@@ -347,6 +367,7 @@ class Sine_Generator_Fast(torch.nn.Module):
 
         y_tmp_weighted = y_tmp * hann_window  # [batch, T, win_size]
 
+        '''
         # 将 y_tmp_weighted 转换为适合 fold 的形状
         y_tmp_weighted_reshaped = y_tmp_weighted.permute(0, 2, 1).contiguous()
         y_tmp_weighted_reshaped = y_tmp_weighted_reshaped.view(B * self.win_size, T) 
@@ -360,14 +381,31 @@ class Sine_Generator_Fast(torch.nn.Module):
         )
         output = output[:, :, self.hop_size:]
 
-        y_return = output.squeeze(0).view(B, T * self.hop_size)
+        y_return = output.squeeze(0).view(B, T * self.hop_size)'''
+
+
+        y_tmp_padded = F.pad(y_tmp_weighted , (0, 0, 0,T % 2), "constant", 0)
+        new_T = y_tmp_padded.shape[1]
+
+        y_tmp_reshaped = y_tmp_padded.view(B, new_T//2, 2, self.win_size)
+        tensor_even = y_tmp_reshaped[:, :, 0, :]  # 偶数时间步
+        tensor_odd = y_tmp_reshaped[:, :, 1, :]   # 奇数时间步
+
+        tensor_even = tensor_even.reshape(B, (new_T//2)*self.win_size)
+        tensor_odd = tensor_odd.reshape(B, (new_T//2)*self.win_size)
+
+        tensor_even = F.pad(tensor_even, (0, self.hop_size), "constant", 0)
+        tensor_odd = F.pad(tensor_odd, (self.hop_size, 0), "constant", 0)
+        cat_tensor = torch.cat((tensor_even.unsqueeze(-1), tensor_odd.unsqueeze(-1)), dim=2)
+        sum_tensor = torch.sum(cat_tensor, dim=2)
+        y_return = sum_tensor[:, self.hop_size:T*self.hop_size + self.hop_size]
 
         return y_return # [batch, T*hop_size]
     
 
 class Noise_Generator(torch.nn.Module):
     
-    def __init__(self, sampling_rate, hop_size, v_noise, u_noise, triangle_ReLU = False ,device='cpu'):
+    def __init__(self, sampling_rate, hop_size, v_noise, u_noise, triangle_ReLU = True ,triangle_ReLU_up = 0.2, triangle_ReLU_down = 0.8,device='cpu'):
         super().__init__()
         self.sampling_rate = sampling_rate
         self.hop_size = hop_size
@@ -375,6 +413,8 @@ class Noise_Generator(torch.nn.Module):
         self.noiseop = v_noise
         self.noiseran = u_noise
         self.triangle_ReLU = triangle_ReLU
+        self.triangle_ReLU_up = triangle_ReLU_up
+        self.triangle_ReLU_down = triangle_ReLU_down
     
     @staticmethod
     def Triangle_ReLU(x:torch.Tensor, x1,x2):
@@ -383,7 +423,17 @@ class Noise_Generator(torch.nn.Module):
         '''
         return -(torch.relu(-(x-x1))/x1) - (torch.relu(x-x1)/x2) + torch.relu(x-x1-x2)/x2 +1
         
-
+    def fast_phase_gen(self, f0_frames):
+        n = torch.arange(self.hop_size, device=f0_frames.device)
+        s0 = f0_frames / self.sampling_rate
+        ds0 = F.pad(s0[:, 1:, :] - s0[:, :-1, :], (0, 0, 0, 1))
+        rad = s0 * (n + 1) + 0.5 * ds0 * n * (n + 1) / self.hop_size
+        rad2 = torch.fmod(rad[..., -1:].float() + 0.5, 1.0) - 0.5
+        rad_acc = rad2.cumsum(dim=1).fmod(1.0).to(f0_frames)
+        rad += F.pad(rad_acc[:, :-1, :], (0, 0, 1, 0))
+        phase = rad.reshape(f0_frames.shape[0], -1, 1)%1
+        return phase
+    
     def forward(self, noise_mag, uv_mask, f0_frames):
         '''
             noise_mag: B x n_noise x T
@@ -394,16 +444,18 @@ class Noise_Generator(torch.nn.Module):
         B, _, T = noise_mag.shape
         noise_mag_upsamp = upsample(noise_mag, self.hop_size) # b x n_noise x T*hop_size
         uv_mask_upsamp = upsample(uv_mask.unsqueeze(1), self.hop_size) # b x 1 x T*hop_size
-        f0_frames_upsamp = upsample(f0_frames, self.hop_size) # b x 1 x T*hop_size
-        x = torch.cumsum(f0_frames_upsamp / self.sampling_rate, axis=2)
-        x = x%1
-        triangle_mask = self.Triangle_ReLU(x, 0.05, 1)
-        triangle_mask = triangle_mask * uv_mask_upsamp + (1-uv_mask_upsamp)
-
-        #noiseop = replicate(self.noiseop, T*self.hop_size, batch=B)
         noiseran = replicate(self.noiseran, T*self.hop_size, batch=B) # b x n_noise x T*hop_size
 
-        #noise_ = (noiseop * uv_mask_upsamp + noiseran * (1 - uv_mask_upsamp)) # b x  n_noise x T*hop_size
+        if self.triangle_ReLU:
+            x = self.fast_phase_gen(f0_frames.transpose(1,2)).transpose(1,2) # b x 1 x T*hop_size
+
+            triangle_mask = self.Triangle_ReLU(x, self.triangle_ReLU_up, self.triangle_ReLU_down)
+            triangle_mask = triangle_mask * uv_mask_upsamp + (1-uv_mask_upsamp)
+            noise_ = noiseran * triangle_mask # b x n_noise x T*hop_size
+        else:
+            noiseop = replicate(self.noiseop, T*self.hop_size, batch=B)
+            noise_ = (noiseop * uv_mask_upsamp + noiseran * (1 - uv_mask_upsamp)) # b x  n_noise x T*hop_size
+
         noise_ = noiseran * triangle_mask # b x n_noise x T*hop_size
         noise = noise_ * noise_mag_upsamp # b x n_noise x T*hop_size
         noise = noise.sum(dim=1) # b x T*hop_size

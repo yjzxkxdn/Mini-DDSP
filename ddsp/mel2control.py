@@ -1,11 +1,8 @@
-
-import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.utils import weight_norm
 
 from ddsp.model_conformer_naive import ConformerNaiveEncoder
-
 
 def split_to_dict(tensor, tensor_splits):
     """Split a tensor into a dictionary of multiple tensors."""

@@ -420,7 +420,7 @@ class MelAnalysis(nn.Module):
             n_mels=n_mels,
             fmin=mel_fmin,
             fmax=mel_fmax,
-            htk=True,
+            htk=False,
             device=device,
         )
         mel_basis = mel_basis.float()
@@ -456,13 +456,11 @@ class MelAnalysis(nn.Module):
             audio = audio[:, 0]
 
         if diffsinger:
-            print(audio.shape)
             audio = F.pad(
                 audio.unsqueeze(0),
                 ((win_size_new - hop_size_new) // 2, (win_size_new - hop_size_new + 1) // 2),
                 mode='reflect'
             ).squeeze(0)
-            print(audio.shape)
             center: bool = False
         else:
             center = True
@@ -500,7 +498,6 @@ class MelAnalysis(nn.Module):
             print('Audio values exceed [-1., 1.] range')
 
         mel: torch.Tensor = self._get_mel(audio, keyshift=keyshift, speed=speed, diffsinger=diffsinger)
-        print(self.clamp)
         log_mel_spec: torch.Tensor = torch.log(torch.clamp(mel, min=self.clamp))
 
         if mel_base != 'e':

@@ -1,11 +1,7 @@
+import numpy as np
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
 from scipy.interpolate import CubicSpline
-
-import numpy as np
-
-import matplotlib.pyplot as plt
 
 def get_mel_fn(
         sr     : float, 

@@ -3,13 +3,11 @@ author: wayn391@mastertones
 '''
 
 import os
-import json
 import time
 import yaml
 import datetime
 import torch
 
-from . import utils
 from torch.utils.tensorboard import SummaryWriter
 
 class Saver(object):

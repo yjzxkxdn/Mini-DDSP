@@ -1,10 +1,9 @@
 import os
 import yaml
 import json
-import pickle
 import torch
-from   pathlib import Path
-from   typing  import Tuple, Any, Dict, TypeVar, Union
+from pathlib import Path
+from typing  import Tuple, Any, Dict, TypeVar, Union
 
 def traverse_dir(
         root_dir:     Path,
