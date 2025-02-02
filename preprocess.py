@@ -82,12 +82,18 @@ class Preprocessor:
                 assert sr == self.sampling_rate, f'Sampling rate of {path_harmonic_audio} is not {self.sampling_rate}'
                 haudio     = torch.from_numpy(haudio).float().to(self.device)
 
-                # extract mel, f0, uv 特征提取
-                mel, f0, uv = self.mel_f0_uv_process(audio)
+                try:
+                    assert audio.shape[0] == haudio.shape[0]
+                    # extract mel, f0, uv 特征提取
+                    mel, f0, uv = self.mel_f0_uv_process(audio)
 
-                # extract amplitude and phase 振幅和相位分析
-                tf0 = torch.from_numpy(f0).float().to(self.device)
-                ampl, phase = self.ampl_phase_process(haudio, tf0)
+                    # extract amplitude and phase 振幅和相位分析
+                    tf0 = torch.from_numpy(f0).float().to(self.device)
+                    ampl, phase = self.ampl_phase_process(haudio, tf0)
+                except:
+                    Path(path_audio).unlink(missing_ok=True)
+                    tqdm.write(f'Audio file {path_audio} f0 extraction failed. Deleted.')
+                    continue
                 
                 # 创建空文件
                 path_mel.parent.mkdir(parents=True, exist_ok=True)
