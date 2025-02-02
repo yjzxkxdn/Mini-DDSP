@@ -1,4 +1,5 @@
 # Miniini DDSP Vocoders
+参考项目<br>
 
 <https://github.com/magenta/ddsp>
 
@@ -6,14 +7,21 @@
 
 <https://github.com/yxlllc/pc-ddsp>
 
+<https://github.com/Sleepwalking/libllsm2>
+
 一个迷你ddsp vocoder，基于pc-ddsp的修改，推理时不需要ISTFT以及复杂的滤波器设计。<br>
+原理是把原先pc-ddsp的sin加法合成部分改成了类似llsm的固定频率正弦波叠加合成，<br>
+气声合成采用一组提前按频率分割好的预制气声，合成时与模型输出的幅度张量相乘<br>
+<br>
 这个项目的特征提取器支持谐波分离，运行
 
 ```bash
 python harmonic_noise_extract.py --input_file /xxx 
 ```
 
-即可进行谐波分离。
+即可进行谐波分离。<br>
+
+
 
 ## 1. 安装依赖
 
