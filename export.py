@@ -13,10 +13,11 @@ class DDSPWrapper(torch.nn.Module):
         self.to(device)
 
     def forward(self, mel, f0):
+        mel = mel.transpose(1, 2)
         f0 = f0[..., None]
-        signal, _, (s_h, s_n) = self.model(mel, f0)
-        return signal, s_h, s_n
-
+        signal, _, (harmonic, noise), (sin_mag, sin_phase) = self.model(mel, f0)
+        print(f' [Output] signal: {signal.shape}, harmonic: {harmonic.shape}, noise: {noise.shape}, sin_mag: {sin_mag.shape}, sin_phase: {sin_phase.shape}')
+        return signal
 
 def parse_args(args=None, namespace=None):
     parser = argparse.ArgumentParser(
@@ -54,7 +55,7 @@ def main():
 
     # load model
     model, args = load_model(cmd.model_path, device=device)
-    #model = DDSPWrapper(model, device)
+    model = DDSPWrapper(model, device)
 
     # extract model dirname and filename
     directory = os.path.dirname(os.path.abspath(cmd.model_path))
@@ -65,7 +66,7 @@ def main():
     n_frames = 10
     mel = torch.randn((1, n_frames, n_mel_channels), dtype=torch.float32, device=device)
     f0 = torch.FloatTensor([[440.] * n_frames]).to(device)
-    f0 = f0[..., None]
+    print(f' [Input] mel: {mel.shape}, f0: {f0.shape}')
     
     # export model
     with torch.no_grad():
@@ -83,9 +84,46 @@ def main():
             )
             torch.jit.save(model, export_path)
 
-        if cmd.onnx:
-            raise NotImplementedError('Exporting to ONNX format is not supported yet.')
+        elif cmd.onnx:
+            # Prepare the export path for ONNX format
+            onnx_version = "unknown"
+            try:
+                import onnx
+                onnx_version = onnx.__version__
+            except ImportError:
+                print("Warning: ONNX package is not installed. Please install it to enable ONNX export.")
+                return
+            
+            export_path = os.path.join(directory, f'{name}-torch{torch.version.__version__[:5]}-onnx{onnx_version}.onnx')
+            print(f' [Exporting] {cmd.model_path} => {export_path}')
 
+            # Export the model to ONNX
+            torch.onnx.export(
+                model, 
+                (mel, f0), 
+                export_path, 
+                export_params=True, 
+                opset_version=15,
+                input_names=['mel', 'f0'], 
+                output_names=['output'], 
+                dynamic_axes={'mel': {1: 'n_frames'}, 'f0': {1: 'n_frames'},
+                              'output': {1: 'n_samples'}} 
+            )
+
+            print(f"Model has been successfully exported to {export_path}")
+def simplify_onnx_model():
+
+    import onnx
+    from onnxsim import simplify
+
+    model = onnx.load(r"E:\pc-ddsp5.29\exp\qixuan8\model_19000-torch2.1.0-onnx1.16.2.onnx")
+
+    model_simp, check = simplify(model)
+
+    assert check, "Simplified ONNX model could not be validated"
+
+    onnx.save(model_simp, 'output_model_simplified.onnx')
 
 if __name__ == '__main__':
     main()
+    #simplify_onnx_model()
