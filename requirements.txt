@@ -8,3 +8,5 @@ PyYAML
 SoundFile
 tqdm
 tensorboard
+onnx
+onnxruntime-gpu
