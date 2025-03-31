@@ -14,7 +14,7 @@ def main(input_file):
     audio, sr = sf.read(input_file)
     audio= torch.from_numpy(audio).float()
     hop_size = 512
-    sin_mag = 128
+    sin_mag = 64
 
     f0, uv = F0Analyzer(sampling_rate = sr, 
                     f0_extractor = 'parselmouth', 
@@ -23,7 +23,7 @@ def main(input_file):
                     f0_max = 800)(audio, len(audio)//hop_size)
     f0=torch.from_numpy(f0).float()
     f0_frames = f0.unsqueeze(0).unsqueeze(1)     # [1 x 1 x n_frames]
-
+    uv = torch.from_numpy(~uv).float()
     
     nhar_range = torch.arange(
         start = 1, end = sin_mag + 1).unsqueeze(0).unsqueeze(-1)   # [max_nhar] -> [1, max_nhar, 1]
@@ -37,6 +37,9 @@ def main(input_file):
                                     audio, 
                                     f0=f0, 
                                 )
+
+    ampl = ampl*(uv).unsqueeze(0)
+    phase = phase*(uv).unsqueeze(0)
 
     harmonic_audio = Sine_Generator_Fast(hop_size = hop_size,sampling_rate = sr)(ampl.unsqueeze(0), phase.unsqueeze(0), f0_list)
     harmonic_audio = harmonic_audio.squeeze(0)
